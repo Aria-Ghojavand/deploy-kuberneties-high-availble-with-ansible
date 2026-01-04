@@ -1,16 +1,22 @@
-- name: Gather package facts to check installed packages
-  package_facts:
+- name: Check if kubectl binary exists
+  stat:
+    path: /usr/local/bin/kubectl
+  register: kubectl_binary
 
-- name: Install Kubernetes packages if not present
-  package:
-    name: "{{ item }}"
-    state: present
-  loop: "{{ kubernetes_packages }}"
-  when: "'{{ item }}' not in ansible_facts.packages.keys()"
+- name: Check if kubeadm binary exists
+  stat:
+    path: /usr/local/bin/kubeadm
+  register: kubeadm_binary
 
-- name: debug ansible 
-  debug:
-    msg: "{{ kubernetes_packages }}"
+- name: Check if kubelet binary exists
+  stat:
+    path: /usr/local/bin/kubelet
+  register: kubelet_binary
+
+- name: Verify all Kubernetes binaries are present
+  fail:
+    msg: "Kubernetes binaries are missing. Please run the containerd role first."
+  when: not (kubectl_binary.stat.exists and kubeadm_binary.stat.exists and kubelet_binary.stat.exists)
 
 - name: check for existence of kubelet environment file.
   stat:

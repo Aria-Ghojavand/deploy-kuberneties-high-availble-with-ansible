@@ -75,29 +75,9 @@
     dest: /root/kubeadm_join_controlplane_command.txt
   delegate_to: k8s-master-1 
 
-- name: Join additional control plane nodes to the cluster
-  shell: "{{ join_command_controlplane.stdout }}"
-  register: join_controlplane_output
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-  delegate_to: "{{ item }}" 
-  with_items:
-    - k8s-master-1
-    - k8s-master-2  
-
 - name: Generate join command for worker nodes
   shell: kubeadm token create --print-join-command
   register: join_command_worker
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
-  delegate_to: k8s-master-1  
-
-- name: Join worker nodes to the cluster
-  shell: "{{ join_command_worker.stdout }}"
-  register: join_worker_output
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-  delegate_to: "{{ item }}"  
-  with_items:
-    - k8s-worker-1
-    - k8s-worker-2 
+  delegate_to: k8s-master-1 

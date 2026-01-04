@@ -1,0 +1,99 @@
+- name: Install socat package (required for kubeadm join)
+  apt:
+    name: socat
+    state: present
+    update_cache: yes
+
+- name: Check if node is already joined
+  shell: systemctl is-active kubelet
+  register: kubelet_status
+  ignore_errors: yes
+
+- name: Check if kubernetes config exists
+  stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+- name: Generate join command for worker nodes
+  shell: kubeadm token create --print-join-command
+  register: join_command_worker
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: k8s-master-1
+  when: not kubelet_conf.stat.exists
+
+- name: Save worker join command to file
+  copy:
+    content: "{{ join_command_worker.stdout }}"
+    dest: /root/kubeadm_join_worker_command.txt
+  delegate_to: k8s-master-1
+  when: not kubelet_conf.stat.exists and join_command_worker is defined
+
+- name: Read worker join command from master-1
+  slurp:
+    src: /root/kubeadm_join_worker_command.txt
+  register: join_command_file
+  delegate_to: k8s-master-1
+  when: not kubelet_conf.stat.exists
+
+- name: Set join command fact
+  set_fact:
+    worker_join_command: "{{ join_command_file.content | b64decode | trim }}"
+  when: not kubelet_conf.stat.exists and join_command_file is defined
+
+- name: Set kubelet node-ip and hostname-override in environment file
+  lineinfile:
+    path: /etc/default/kubelet
+    regexp: '^KUBELET_EXTRA_ARGS='
+    line: 'KUBELET_EXTRA_ARGS="--node-ip={{ private_ip }} --hostname-override={{ inventory_hostname }}"'
+    create: yes
+    backup: yes
+  when: not kubelet_conf.stat.exists
+
+- name: Join worker node to Kubernetes cluster
+  shell: "{{ worker_join_command }}"
+  register: worker_join_result
+  when: not kubelet_conf.stat.exists and worker_join_command is defined
+
+- name: Display worker join result
+  debug:
+    var: worker_join_result.stdout
+  when: worker_join_result is defined
+
+- name: Enable and start kubelet service
+  systemd:
+    name: kubelet
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for node to be ready
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get node {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  register: node_ready_status
+  delegate_to: k8s-master-1
+  until: node_ready_status.stdout == "True"
+  retries: 10
+  delay: 30
+  ignore_errors: yes
+
+- name: Display node status
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes {{ inventory_hostname }}
+  register: node_status
+  delegate_to: k8s-master-1
+  ignore_errors: yes
+
+- name: Show final node status
+  debug:
+    var: node_status.stdout
+  when: node_status is defined
+
+- name: Verify worker node is properly joined
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes {{ inventory_hostname }}
+  register: worker_node_status
+  delegate_to: k8s-master-1
+  ignore_errors: yes
+
+- name: Display worker node status
+  debug:
+    msg: "Worker node status: {{ worker_node_status.stdout_lines }}"
+  when: worker_node_status is defined
