@@ -1,0 +1,78 @@
+- name: config Kubernetes Master and Worker Nodes
+  hosts: all
+  become: true
+  roles:
+    - common
+    
+- name: Install and Configure containerd on Debian
+  hosts: all
+  become: yes
+  vars:
+    containerd_version: "1.6.21"  
+    docker_repo: "https://download.docker.com/linux/debian"
+  roles:
+    - containerd
+
+- name: config Kubernetes Master Node
+  hosts: k8s_master
+  become: true
+  roles:
+    - kubelet
+    - kubectl
+
+- name: config Kubernetes Worker Node
+  hosts: k8s_node
+  become: true
+  roles:
+   - kubelet
+
+- name: Initialize Kubernetes Control Plane
+  hosts: k8s_master_1
+  become: true
+  roles:
+    - initiialize
+
+- name: Setup kubeconfig for debian user
+  hosts: k8s_master_1
+  become: true
+  tasks:
+    - name: Create .kube directory for debian user
+      file:
+        path: /home/debian/.kube
+        state: directory
+        owner: debian
+        group: debian
+        mode: '0755'
+
+    - name: Copy admin.conf to debian user's kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/debian/.kube/config
+        owner: debian
+        group: debian
+        mode: '0600'
+        remote_src: yes
+
+    - name: Set KUBECONFIG environment variable for debian user
+      lineinfile:
+        path: /home/debian/.bashrc
+        line: 'export KUBECONFIG=/home/debian/.kube/config'
+        create: yes
+
+- name: Install Calico CNI on the first master node
+  hosts: k8s_master_1
+  become: true
+  roles:
+    - calico-cni
+
+- name: Join additional master nodes to the cluster
+  hosts: k8s_master
+  become: true
+  roles:
+    - join-masters
+
+- name: Join worker nodes to the cluster
+  hosts: k8s_node
+  become: true
+  roles:
+    - join-worker

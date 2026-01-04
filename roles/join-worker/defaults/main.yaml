@@ -1,0 +1,4 @@
+ 
+kubelet_extra_args: "--node-ip={{ private_ip }} --hostname-override={{ inventory_hostname }}"
+worker_node_ready_timeout: 300 
+worker_join_retries: 3

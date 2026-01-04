@@ -1,0 +1,9 @@
+{% if inventory_hostname == "k8s-master-1" %}
+KUBELET_EXTRA_ARGS="--node-ip=192.168.0.11 "
+{% elif inventory_hostname == "k8s-master-2" %}
+KUBELET_EXTRA_ARGS="--node-ip=192.168.0.12 "
+{% elif inventory_hostname == "k8s-master-3" %}
+KUBELET_EXTRA_ARGS="--node-ip=192.168.0.13 "
+{% else %}
+KUBELET_EXTRA_ARGS="--node-ip={{ private_ip }} "
+{% endif %}

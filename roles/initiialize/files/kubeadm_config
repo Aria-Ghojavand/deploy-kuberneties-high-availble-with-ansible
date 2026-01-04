@@ -10,7 +10,7 @@ networking:
 apiServer:
   extraArgs:
     authorization-mode: "Node,RBAC"
-controlPlaneEndpoint: "aginter.ir:6443"
+controlPlaneEndpoint: "titimod.ir:6443"
 controllerManager:
   extraArgs:
     bind-address: "0.0.0.0"
@@ -21,10 +21,10 @@ scheduler:
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: InitConfiguration
 localAPIEndpoint:
-  advertiseAddress: "172.20.20.10"
+  advertiseAddress: "192.168.0.11"
   bindPort: 6443
 nodeRegistration:
-  name: k8s-master-0
+  name: cluster-server-1
   criSocket: unix:///var/run/containerd/containerd.sock
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1

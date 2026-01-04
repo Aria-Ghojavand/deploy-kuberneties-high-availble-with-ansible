@@ -1,0 +1,37 @@
+- name: System Configuration | Disable swap
+  ansible.posix.mount:
+    name: "{{ item }}"
+    fstype: swap
+    state: absent
+  loop: ["none", "swap"]
+
+- name: Add titimod.ir entry to /etc/hosts for all nodes
+  lineinfile:
+    path: /etc/hosts
+    line: "172.16.25.2 titimod.ir"
+    state: present
+    backup: yes
+
+- name: Load br_netfilter module
+  modprobe:
+    name: br_netfilter
+    state: present
+
+- name: Create sysctl configuration file for K8S
+  file:
+    path: /etc/sysctl.d/99-kubernetes-k8s.conf
+    state: touch
+    mode: '0644'
+
+- name: Configure sysctl parameters for K8S
+  lineinfile:
+    path: /etc/sysctl.d/99-kubernetes-k8s.conf
+    line: "{{ item }}"
+    create: yes
+  with_items:
+    - "net.bridge.bridge-nf-call-iptables  = 1"
+    - "net.ipv4.ip_forward                 = 1"
+    - "net.bridge.bridge-nf-call-ip6tables = 1"
+
+- name: Apply sysctl parameters
+  command: sysctl --system

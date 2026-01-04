@@ -1,0 +1,207 @@
+- name: Install required dependencies
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - iptables
+      - socat
+    state: present
+    update_cache: no
+
+- name: Ensure /etc/apt/keyrings directory exists
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+    
+- name: Create /usr/local/bin directory
+  file:
+    path: /usr/local/bin
+    state: directory
+    mode: '0755'
+
+- name: Download kubectl binary
+  get_url:
+    url: "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+    dest: /usr/local/bin/kubectl
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Download kubeadm binary
+  get_url:
+    url: "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubeadm"
+    dest: /usr/local/bin/kubeadm
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Download kubelet binary
+  get_url:
+    url: "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubelet"
+    dest: /usr/local/bin/kubelet
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Create kubelet systemd service file
+  copy:
+    dest: /etc/systemd/system/kubelet.service
+    content: |
+      [Unit]
+      Description=kubelet: The Kubernetes Node Agent
+      Documentation=https://kubernetes.io/docs/home/
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      ExecStart=/usr/local/bin/kubelet
+      Restart=always
+      StartLimitInterval=0
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+
+- name: Create kubelet service directory
+  file:
+    path: /etc/systemd/system/kubelet.service.d
+    state: directory
+    mode: '0755'
+
+- name: Create kubelet service override
+  copy:
+    dest: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+    content: |
+      [Service]
+      Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
+      Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+      EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
+      EnvironmentFile=-/etc/default/kubelet
+      ExecStart=
+      ExecStart=/usr/local/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
+    mode: '0644'
+
+- name: Check if containerd is installed
+  command: which containerd
+  register: containerd_installed
+  ignore_errors: true
+
+- name: Add Docker's official GPG key
+  shell: |
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  args:
+    creates: /etc/apt/keyrings/docker.gpg
+
+- name: Add Docker apt repository for Debian
+  apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+    state: present
+    update_cache: yes
+
+- name: Install containerd
+  apt:
+    name: containerd.io
+    state: present
+
+- name: Unmask containerd service if it's masked
+  systemd:
+    name: containerd
+    masked: no
+
+- name: Start containerd service to ensure it's running
+  systemd:
+    name: containerd
+    state: started
+    enabled: yes
+
+- name: Wait for containerd service to be ready
+  command: systemctl is-active containerd
+  register: containerd_status
+  until: containerd_status.stdout == "active"
+  retries: 10
+  delay: 2
+
+- name: Ensure /etc/containerd directory exists
+  file:
+    path: "{{ containerd_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Generate default containerd config
+  command: /usr/bin/containerd config default
+  register: containerd_config
+
+- name: Write containerd config to /etc/containerd/config.toml
+  copy:
+    dest: "{{ containerd_config_file }}"
+    content: "{{ containerd_config.stdout }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure SystemdCgroup is set to true
+  ansible.builtin.lineinfile:
+    path: /etc/containerd/config.toml
+    regexp: '^\s*SystemdCgroup\s*=\s*.*$'
+    line: '            SystemdCgroup = true'
+    backrefs: yes
+  become: true
+
+- name: Start and enable containerd service
+  systemd:
+    name: containerd
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+
+- name: Download crictl binary
+  get_url:
+    url: "https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.30.0/crictl-v1.30.0-linux-amd64.tar.gz"
+    dest: /tmp/crictl.tar.gz
+    mode: '0644'
+
+- name: Extract crictl binary
+  unarchive:
+    src: /tmp/crictl.tar.gz
+    dest: /usr/local/bin
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create crictl config
+  copy:
+    dest: /etc/crictl.yaml
+    content: |
+      runtime-endpoint: unix:///var/run/containerd/containerd.sock
+      image-endpoint: unix:///var/run/containerd/containerd.sock
+      timeout: 2
+      debug: false
+      pull-image-on-create: false
+    mode: '0644'
+
+- name: Wait for containerd to be ready
+  command: systemctl is-active containerd
+  register: containerd_status
+  until: containerd_status.stdout == "active"
+  retries: 10
+  delay: 2
+
+- name: Verify containerd CRI endpoint
+  command: crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock version
+  register: crictl_test
+  ignore_errors: yes
+
+- name: Display containerd CRI status
+  debug:
+    var: crictl_test
+  when: crictl_test is defined

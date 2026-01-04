@@ -1,0 +1,5 @@
+kubelet_service_dir: "/etc/systemd/system/kubelet.service.d"
+kubelet_config_file: "/etc/kubernetes/kubelet.conf"
+kubeadm_join_timeout: 300
+node_ready_check_retries: 10
+node_ready_check_delay: 30

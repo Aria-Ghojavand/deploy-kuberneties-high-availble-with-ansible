@@ -1,0 +1,121 @@
+- name: Wait for API server to be ready
+  uri:
+    url: "https://{{ ansible_default_ipv4.address }}:6443/healthz"
+    method: GET
+    validate_certs: no
+    status_code: 200
+  register: api_server_ready
+  until: api_server_ready.status == 200
+  retries: 30
+  delay: 10
+  delegate_to: k8s-master-1
+
+- name: Check if kubectl is working
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes
+  register: kubectl_test
+  delegate_to: k8s-master-1
+
+- name: Display kubectl test output
+  debug:
+    var: kubectl_test.stdout
+  delegate_to: k8s-master-1
+
+- name: Apply Calico CRDs first
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf create -f {{ calico_crds_url }}
+  register: calico_crds_result
+  delegate_to: k8s-master-1
+  failed_when: calico_crds_result.rc != 0 and "AlreadyExists" not in calico_crds_result.stderr
+
+- name: Display Calico CRDs installation result
+  debug:
+    var: calico_crds_result.stdout
+  delegate_to: k8s-master-1
+
+- name: Apply Tigera Calico operator
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf create -f {{ tigera_operator_url }}
+  register: tigera_operator_result
+  delegate_to: k8s-master-1
+  failed_when: tigera_operator_result.rc != 0 and "AlreadyExists" not in tigera_operator_result.stderr
+
+- name: Display Tigera operator installation result
+  debug:
+    var: tigera_operator_result.stdout
+  delegate_to: k8s-master-1
+
+- name: Wait for Tigera operator to be ready
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n tigera-operator
+  register: tigera_pods
+  until: "'Running' in tigera_pods.stdout"
+  retries: 60
+  delay: 15
+  delegate_to: k8s-master-1
+
+- name: Download Calico custom resources manifest
+  get_url:
+    url: "{{ calico_custom_resources_url }}"
+    dest: /tmp/custom-resources.yaml
+    mode: '0644'
+  delegate_to: k8s-master-1
+
+- name: Apply Calico custom resources
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf create -f /tmp/custom-resources.yaml
+  register: calico_installation_result
+  delegate_to: k8s-master-1
+  failed_when: calico_installation_result.rc != 0 and "AlreadyExists" not in calico_installation_result.stderr
+
+- name: Display Calico installation result
+  debug:
+    var: calico_installation_result.stdout
+  delegate_to: k8s-master-1
+
+- name: Wait for Calico pods to be ready
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n calico-system --no-headers | grep -v Running | wc -l
+  register: calico_pods_not_running
+  until: calico_pods_not_running.stdout == "0"
+  retries: 90
+  delay: 30
+  delegate_to: k8s-master-1
+  ignore_errors: yes
+
+- name: Check node status after CNI installation
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o wide
+  register: node_status_after_cni
+  delegate_to: k8s-master-1
+
+- name: Display node status after CNI installation
+  debug:
+    var: node_status_after_cni.stdout
+  delegate_to: k8s-master-1
+
+- name: Verify node is Ready
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes --no-headers | awk '{print $2}'
+  register: node_ready_status
+  until: "'Ready' in node_ready_status.stdout"
+  retries: 45
+  delay: 30
+  delegate_to: k8s-master-1
+
+- name: Final Calico readiness check - wait for all Calico components
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n calico-system --no-headers 2>/dev/null | wc -l
+  register: calico_pod_count
+  until: calico_pod_count.stdout|int > 0
+  retries: 30
+  delay: 10
+  delegate_to: k8s-master-1
+
+- name: Display final Calico status
+  shell: /usr/local/bin/kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n calico-system -o wide
+  register: final_calico_status
+  delegate_to: k8s-master-1
+
+- name: Show final Calico status
+  debug:
+    var: final_calico_status.stdout
+  delegate_to: k8s-master-1
+
+- name: Wait extra time for Calico network to fully stabilize
+  pause:
+    seconds: 120
+    prompt: "Waiting 2 minutes for Calico network to fully stabilize before proceeding..."
+  delegate_to: k8s-master-1

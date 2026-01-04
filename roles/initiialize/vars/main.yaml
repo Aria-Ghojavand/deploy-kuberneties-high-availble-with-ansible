@@ -1,4 +1,5 @@
 pod_network_cidr: "192.168.0.0/16"
-private_ip_controlplane: "172.20.20.10"
+private_ip_controlplane: "172.16.25.2"
 admin_conf_dir: "/etc/kubernetes/admin.conf"
+public_ip_controlplane: "37.32.9.27"
 k8s_config: "/etc/kubernetes/kubelet.conf"
